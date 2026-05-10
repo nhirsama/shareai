@@ -15,11 +15,17 @@ on:
         required: false
         type: boolean
         default: false
+      separated_deploy:
+        description: 'Separated deploy: frontend to CF Pages, backend API-only Docker image'
+        required: false
+        type: boolean
+        default: true
 
 # 环境变量：合并 workflow_dispatch 输入和 repository variable
 # tag push 触发时读取 vars.SIMPLE_RELEASE，workflow_dispatch 时使用输入参数
 env:
   SIMPLE_RELEASE: ${{ github.event.inputs.simple_release == 'true' || vars.SIMPLE_RELEASE == 'true' }}
+  SEPARATED_DEPLOY: ${{ github.event.inputs.separated_deploy == 'true' || vars.SEPARATED_DEPLOY == 'true' }}
 
 permissions:
   contents: write
@@ -53,6 +59,7 @@ jobs:
 
   build-frontend:
     runs-on: ubuntu-latest
+    if: ${{ !(github.event.inputs.separated_deploy == 'true' || vars.SEPARATED_DEPLOY == 'true') }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -84,8 +91,23 @@ jobs:
           path: backend/internal/web/dist/
           retention-days: 1
 
+  deploy-frontend:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.separated_deploy == 'true' || vars.SEPARATED_DEPLOY == 'true' }}
+    steps:
+      - name: Trigger Cloudflare Pages Deploy
+        env:
+          CF_PAGES_DEPLOY_HOOK_URL: ${{ secrets.CF_PAGES_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$CF_PAGES_DEPLOY_HOOK_URL" ]; then
+            echo "CF_PAGES_DEPLOY_HOOK_URL not configured, skipping"
+            exit 0
+          fi
+          curl -s -X POST "$CF_PAGES_DEPLOY_HOOK_URL" --fail-with-body
+
   release:
     needs: [update-version, build-frontend]
+    if: ${{ always() && needs.update-version.result == 'success' && (needs.build-frontend.result == 'success' || needs.build-frontend.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -101,6 +123,7 @@ jobs:
           path: backend/cmd/server/
 
       - name: Download frontend artifact
+        if: ${{ env.SEPARATED_DEPLOY != 'true' }}
         uses: actions/download-artifact@v8
         with:
           name: frontend-dist
@@ -176,7 +199,7 @@ jobs:
         uses: goreleaser/goreleaser-action@v7
         with:
           version: '~> v2'
-          args: release --clean --skip=validate ${{ env.SIMPLE_RELEASE == 'true' && '--config=.goreleaser.simple.yaml' || '' }}
+          args: release --clean --skip=validate ${{ env.SIMPLE_RELEASE == 'true' && '--config=.goreleaser.simple.yaml' || env.SEPARATED_DEPLOY == 'true' && '--config=.goreleaser.separated.yaml' || '' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_MESSAGE: ${{ steps.tag_message.outputs.message }}
