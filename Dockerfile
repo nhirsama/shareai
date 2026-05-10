@@ -58,7 +58,7 @@ RUN go mod download
 # Copy backend source first
 COPY backend/ ./
 
-# Copy frontend dist from previous stage (must be after backend copy to avoid being overwritten)
+# Copy frontend dist from previous stage
 COPY --from=frontend-builder /app/backend/internal/web/dist ./internal/web/dist
 
 # Build the binary (BuildType=release for CI builds, embed frontend)
