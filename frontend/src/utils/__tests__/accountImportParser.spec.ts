@@ -213,8 +213,8 @@ describe('parseImportFiles', () => {
     })
   })
 
-  describe('DataAccount passthrough', () => {
-    it('passes through complete AdminDataAccount format', () => {
+  describe('DataAccount passthrough normalization', () => {
+    it('passes through complete AdminDataAccount format with valid values', () => {
       const account = {
         name: 'full-account',
         platform: 'openai',
@@ -232,10 +232,179 @@ describe('parseImportFiles', () => {
       expect(result.accounts[0].concurrency).toBe(5)
       expect(result.accounts[0].priority).toBe(80)
     })
+
+    it('clamps concurrency=0 to minimum 1', () => {
+      const account = {
+        name: 'zero-conc',
+        platform: 'openai',
+        type: 'oauth',
+        credentials: { access_token: 'tok' },
+        concurrency: 0,
+        priority: 50
+      }
+      const result = parseImportFiles(
+        [{ filename: 'f.json', content: JSON.stringify(account) }],
+        'openai',
+        'oauth'
+      )
+      expect(result.accounts[0].concurrency).toBe(1)
+    })
+
+    it('clamps negative concurrency to 1', () => {
+      const account = {
+        name: 'neg-conc',
+        platform: 'openai',
+        type: 'oauth',
+        credentials: { access_token: 'tok' },
+        concurrency: -5,
+        priority: 50
+      }
+      const result = parseImportFiles(
+        [{ filename: 'f.json', content: JSON.stringify(account) }],
+        'openai',
+        'oauth'
+      )
+      expect(result.accounts[0].concurrency).toBe(1)
+    })
+
+    it('defaults concurrency when missing', () => {
+      const account = {
+        name: 'no-conc',
+        platform: 'openai',
+        type: 'oauth',
+        credentials: { access_token: 'tok' }
+      }
+      const result = parseImportFiles(
+        [{ filename: 'f.json', content: JSON.stringify(account) }],
+        'openai',
+        'oauth'
+      )
+      expect(result.accounts[0].concurrency).toBe(3)
+    })
+
+    it('rejects invalid platform', () => {
+      const account = {
+        name: 'bad-plat',
+        platform: 'invalid',
+        type: 'oauth',
+        credentials: { access_token: 'tok' }
+      }
+      const result = parseImportFiles(
+        [{ filename: 'f.json', content: JSON.stringify(account) }],
+        'openai',
+        'oauth'
+      )
+      expect(result.accounts).toHaveLength(0)
+      expect(result.skipped).toBe(1)
+    })
+
+    it('rejects invalid type', () => {
+      const account = {
+        name: 'bad-type',
+        platform: 'openai',
+        type: 'invalid',
+        credentials: { access_token: 'tok' }
+      }
+      const result = parseImportFiles(
+        [{ filename: 'f.json', content: JSON.stringify(account) }],
+        'openai',
+        'oauth'
+      )
+      expect(result.accounts).toHaveLength(0)
+      expect(result.skipped).toBe(1)
+    })
+
+    it('truncates long name in passthrough', () => {
+      const account = {
+        name: 'a'.repeat(150),
+        platform: 'openai',
+        type: 'oauth',
+        credentials: { access_token: 'tok' },
+        concurrency: 3,
+        priority: 50
+      }
+      const result = parseImportFiles(
+        [{ filename: 'f.json', content: JSON.stringify(account) }],
+        'openai',
+        'oauth'
+      )
+      expect(result.accounts[0].name).toHaveLength(100)
+    })
+
+    it('does not treat array credentials as DataAccount format', () => {
+      const account = {
+        name: 'arr-creds',
+        platform: 'openai',
+        type: 'oauth',
+        credentials: ['not', 'valid']
+      }
+      const result = parseImportFiles(
+        [{ filename: 'f.json', content: JSON.stringify(account) }],
+        'openai',
+        'oauth'
+      )
+      expect(result.accounts).toHaveLength(0)
+    })
+
+    it('does not treat empty credentials as DataAccount format', () => {
+      const account = {
+        name: 'empty-creds',
+        platform: 'openai',
+        type: 'oauth',
+        credentials: {}
+      }
+      const result = parseImportFiles(
+        [{ filename: 'f.json', content: JSON.stringify(account) }],
+        'openai',
+        'oauth'
+      )
+      expect(result.accounts).toHaveLength(0)
+    })
+
+    it('strips proxy_key from passthrough accounts', () => {
+      const account = {
+        name: 'with-proxy',
+        platform: 'openai',
+        type: 'oauth',
+        credentials: { access_token: 'tok' },
+        concurrency: 3,
+        priority: 50,
+        proxy_key: 'some-proxy'
+      }
+      const result = parseImportFiles(
+        [{ filename: 'f.json', content: JSON.stringify(account) }],
+        'openai',
+        'oauth'
+      )
+      expect(result.accounts[0].proxy_key).toBeUndefined()
+    })
+  })
+
+  describe('AdminDataPayload wrapper', () => {
+    it('expands accounts from payload wrapper', () => {
+      const payload = {
+        type: 'sub2api-data',
+        version: 1,
+        exported_at: '2026-01-01T00:00:00Z',
+        proxies: [],
+        accounts: [
+          { name: 'acc1', platform: 'openai', type: 'oauth', credentials: { access_token: 'a' }, concurrency: 3, priority: 50 },
+          { name: 'acc2', platform: 'openai', type: 'oauth', credentials: { access_token: 'b' }, concurrency: 3, priority: 50 }
+        ]
+      }
+      const result = parseImportFiles(
+        [{ filename: 'export.json', content: JSON.stringify(payload) }],
+        'openai',
+        'oauth'
+      )
+      expect(result.accounts).toHaveLength(2)
+      expect(result.accounts[0].name).toBe('acc1')
+      expect(result.accounts[1].name).toBe('acc2')
+    })
   })
 
   describe('error limiting', () => {
-    it('caps errors at 100', () => {
+    it('caps errors at 100 but reports totalErrors', () => {
       const entries = Array.from({ length: 200 }, (_, i) => ({ bad_field: i }))
       const content = JSON.stringify(entries)
       const result = parseImportFiles(
@@ -244,6 +413,7 @@ describe('parseImportFiles', () => {
         'oauth'
       )
       expect(result.errors.length).toBeLessThanOrEqual(100)
+      expect(result.totalErrors).toBe(200)
       expect(result.skipped).toBe(200)
     })
   })

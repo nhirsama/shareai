@@ -76,8 +76,8 @@
         <div class="max-h-32 overflow-auto">
           <div v-for="(err, idx) in displayErrors" :key="idx">{{ err.filename }}: {{ err.message }}</div>
         </div>
-        <div v-if="parseErrors.length > 100" class="mt-1 font-medium">
-          ... {{ t('admin.accounts.batchImportErrorsTruncated', { total: parseErrors.length }) }}
+        <div v-if="parseTotalErrors > parseErrors.length" class="mt-1 font-medium">
+          ... {{ t('admin.accounts.batchImportErrorsTruncated', { total: parseTotalErrors }) }}
         </div>
       </div>
 
@@ -130,6 +130,7 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
 import { parseImportFiles } from '@/utils/accountImportParser'
+import { extractApiErrorMessage } from '@/utils/apiError'
 import type { AccountPlatform, AccountType, AdminDataImportResult } from '@/types'
 
 interface Props {
@@ -153,6 +154,7 @@ const files = ref<File[]>([])
 const importing = ref(false)
 const result = ref<AdminDataImportResult | null>(null)
 const parseErrors = ref<{ filename: string; message: string }[]>([])
+const parseTotalErrors = ref(0)
 const fileInput = ref<HTMLInputElement | null>(null)
 
 const platforms = [
@@ -194,6 +196,7 @@ watch(
       files.value = []
       result.value = null
       parseErrors.value = []
+      parseTotalErrors.value = 0
       if (fileInput.value) fileInput.value.value = ''
     }
   }
@@ -233,6 +236,7 @@ const handleImport = async () => {
   importing.value = true
   result.value = null
   parseErrors.value = []
+  parseTotalErrors.value = 0
 
   try {
     const MAX_TOTAL_SIZE = 50 * 1024 * 1024
@@ -251,6 +255,7 @@ const handleImport = async () => {
 
     const parsed = parseImportFiles(fileInputs, platform.value, accountType.value)
     parseErrors.value = parsed.errors
+    parseTotalErrors.value = parsed.totalErrors
 
     if (parsed.accounts.length === 0) {
       appStore.showError(t('admin.accounts.batchImportNoAccounts'))
@@ -272,13 +277,14 @@ const handleImport = async () => {
 
     if (res.account_failed > 0) {
       appStore.showError(t('admin.accounts.batchImportCompletedWithErrors', { failed: res.account_failed }))
+    } else if (parseErrors.value.length > 0 || parsed.skipped > 0) {
+      appStore.showSuccess(t('admin.accounts.batchImportSuccess', { created: res.account_created }))
     } else {
       appStore.showSuccess(t('admin.accounts.batchImportSuccess', { created: res.account_created }))
       emit('imported')
     }
   } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : t('admin.accounts.batchImportFailed')
-    appStore.showError(msg)
+    appStore.showError(extractApiErrorMessage(error, t('admin.accounts.batchImportFailed')))
   } finally {
     importing.value = false
   }

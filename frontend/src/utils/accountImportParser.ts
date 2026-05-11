@@ -9,7 +9,11 @@ export interface ParseResult {
   accounts: AdminDataAccount[]
   errors: { filename: string; message: string }[]
   skipped: number
+  totalErrors: number
 }
+
+const VALID_PLATFORMS: AccountPlatform[] = ['openai', 'anthropic', 'gemini', 'antigravity']
+const VALID_TYPES: AccountType[] = ['oauth', 'setup-token', 'apikey', 'upstream', 'bedrock', 'service_account']
 
 const MAX_NAME_LENGTH = 100
 const MAX_ERRORS_REPORTED = 100
@@ -22,15 +26,18 @@ export function parseImportFiles(
   const accounts: AdminDataAccount[] = []
   const errors: { filename: string; message: string }[] = []
   let skipped = 0
+  let totalErrors = 0
 
   for (const file of files) {
     try {
       const { entries, skippedLines } = parseFileContent(file.content)
       if (entries.length === 0 && skippedLines === 0) {
+        totalErrors++
         pushError(errors, file.filename, 'Empty or no parseable JSON entries')
         continue
       }
       if (skippedLines > 0) {
+        totalErrors += skippedLines
         pushError(errors, file.filename, `${skippedLines} line(s) skipped (invalid JSON)`)
       }
       for (const entry of entries) {
@@ -40,17 +47,19 @@ export function parseImportFiles(
         } else {
           skipped++
           if (result.reason) {
+            totalErrors++
             pushError(errors, file.filename, result.reason)
           }
         }
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Parse error'
+      totalErrors++
       pushError(errors, file.filename, msg)
     }
   }
 
-  return { accounts, errors, skipped }
+  return { accounts, errors, skipped, totalErrors }
 }
 
 function pushError(errors: { filename: string; message: string }[], filename: string, message: string) {
@@ -78,6 +87,9 @@ function parseFileContent(content: string): FileParseResult {
     try {
       const obj = JSON.parse(trimmed)
       if (Array.isArray(obj)) return { entries: obj, skippedLines: 0 }
+      if (isDataPayloadFormat(obj)) {
+        return { entries: obj.accounts, skippedLines: 0 }
+      }
       return { entries: [obj], skippedLines: 0 }
     } catch {
       return parseJsonLines(trimmed)
@@ -102,6 +114,10 @@ function parseJsonLines(content: string): FileParseResult {
   return { entries: results, skippedLines }
 }
 
+function isDataPayloadFormat(obj: Record<string, unknown>): boolean {
+  return Array.isArray(obj.accounts)
+}
+
 interface NormalizeResult {
   account: AdminDataAccount | null
   reason?: string
@@ -118,9 +134,8 @@ function normalizeEntry(
   }
   const obj = entry as Record<string, unknown>
 
-  // Support existing AdminDataAccount / DataPayload format passthrough
   if (isDataAccountFormat(obj)) {
-    return { account: obj as unknown as AdminDataAccount }
+    return normalizeDataAccount(obj)
   }
 
   const credentials = extractCredentials(obj, platform, type)
@@ -151,8 +166,50 @@ function isDataAccountFormat(obj: Record<string, unknown>): boolean {
     typeof obj.type === 'string' &&
     typeof obj.credentials === 'object' &&
     obj.credentials !== null &&
+    !Array.isArray(obj.credentials) &&
+    Object.keys(obj.credentials as object).length > 0 &&
     typeof obj.name === 'string'
   )
+}
+
+function normalizeDataAccount(obj: Record<string, unknown>): NormalizeResult {
+  const platform = obj.platform as string
+  const type = obj.type as string
+
+  if (!VALID_PLATFORMS.includes(platform as AccountPlatform)) {
+    return { account: null, reason: `${obj.name}: invalid platform "${platform}"` }
+  }
+  if (!VALID_TYPES.includes(type as AccountType)) {
+    return { account: null, reason: `${obj.name}: invalid type "${type}"` }
+  }
+
+  const rawName = String(obj.name)
+  const name = rawName.length > MAX_NAME_LENGTH ? rawName.substring(0, MAX_NAME_LENGTH) : rawName
+
+  const concurrency = clampInt(obj.concurrency, 1, 100, 3)
+  const priority = clampInt(obj.priority, 1, 100, 50)
+
+  const account: AdminDataAccount = {
+    name,
+    platform: platform as AccountPlatform,
+    type: type as AccountType,
+    credentials: obj.credentials as Record<string, unknown>,
+    concurrency,
+    priority
+  }
+
+  if (obj.extra && typeof obj.extra === 'object') account.extra = obj.extra as Record<string, unknown>
+  if (typeof obj.notes === 'string') account.notes = obj.notes
+  if (typeof obj.rate_multiplier === 'number') account.rate_multiplier = Math.max(0, obj.rate_multiplier)
+  if (typeof obj.expires_at === 'number') account.expires_at = obj.expires_at
+  if (typeof obj.auto_pause_on_expired === 'boolean') account.auto_pause_on_expired = obj.auto_pause_on_expired
+
+  return { account }
+}
+
+function clampInt(value: unknown, min: number, max: number, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
+  return Math.max(min, Math.min(max, Math.round(value)))
 }
 
 function extractCredentials(
