@@ -90,7 +90,7 @@
           {{ t('admin.accounts.batchImportResult') }}
         </div>
         <div class="text-sm text-gray-700 dark:text-dark-300">
-          {{ t('admin.accounts.batchImportResultSummary', { created: result.account_created, failed: result.account_failed }) }}
+          {{ t('admin.accounts.batchImportResultSummary', { created: result.account_created, skipped: result.account_skipped, failed: result.account_failed }) }}
         </div>
         <div v-if="result.errors?.length" class="mt-2">
           <div class="text-sm font-medium text-red-600 dark:text-red-400">

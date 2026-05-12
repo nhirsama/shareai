@@ -25,6 +25,7 @@ type stubAdminService struct {
 	updatedProxies       []*service.UpdateProxyInput
 	testedProxyIDs       []int64
 	createAccountErr     error
+	createAccountErrOnce bool
 	updateAccountErr     error
 	bulkUpdateAccountErr error
 	checkMixedErr        error
@@ -329,11 +330,15 @@ func (s *stubAdminService) GetAccountsByIDs(ctx context.Context, ids []int64) ([
 func (s *stubAdminService) CreateAccount(ctx context.Context, input *service.CreateAccountInput) (*service.Account, error) {
 	s.mu.Lock()
 	s.createdAccounts = append(s.createdAccounts, input)
-	s.mu.Unlock()
-	if s.createAccountErr != nil {
-		return nil, s.createAccountErr
+	err := s.createAccountErr
+	if err != nil && s.createAccountErrOnce {
+		s.createAccountErr = nil
 	}
-	account := service.Account{ID: 300, Name: input.Name, Status: service.StatusActive}
+	s.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	account := service.Account{ID: 300, Name: input.Name, Platform: input.Platform, Type: input.Type, Status: service.StatusActive}
 	return &account, nil
 }
 
