@@ -68,6 +68,7 @@ type DataImportResult struct {
 	ProxyReused    int               `json:"proxy_reused"`
 	ProxyFailed    int               `json:"proxy_failed"`
 	AccountCreated int               `json:"account_created"`
+	AccountSkipped int               `json:"account_skipped"`
 	AccountFailed  int               `json:"account_failed"`
 	Errors         []DataImportError `json:"errors,omitempty"`
 }
@@ -81,6 +82,31 @@ type DataImportError struct {
 
 func buildProxyKey(protocol, host string, port int, username, password string) string {
 	return fmt.Sprintf("%s|%s|%d|%s|%s", strings.TrimSpace(protocol), strings.TrimSpace(host), port, strings.TrimSpace(username), strings.TrimSpace(password))
+}
+
+func accountCredentialFingerprint(platform, accountType string, credentials map[string]any) string {
+	if credentials == nil {
+		return ""
+	}
+	normalizedPlatform := strings.ToLower(strings.TrimSpace(platform))
+	normalizedType := strings.ToLower(strings.TrimSpace(accountType))
+	var raw string
+	switch normalizedType {
+	case service.AccountTypeOAuth, service.AccountTypeSetupToken:
+		if rt, ok := credentials["refresh_token"].(string); ok && strings.TrimSpace(rt) != "" {
+			raw = "rt:" + strings.TrimSpace(rt)
+		} else if at, ok := credentials["access_token"].(string); ok && strings.TrimSpace(at) != "" {
+			raw = "at:" + strings.TrimSpace(at)
+		}
+	case service.AccountTypeAPIKey:
+		if key, ok := credentials["api_key"].(string); ok && strings.TrimSpace(key) != "" {
+			raw = "ak:" + strings.TrimSpace(key)
+		}
+	}
+	if raw == "" {
+		return ""
+	}
+	return normalizedPlatform + ":" + normalizedType + ":" + raw
 }
 
 func (h *AccountHandler) ExportData(c *gin.Context) {
@@ -268,6 +294,19 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 		}
 	}
 
+	// Account dedup: build fingerprint set from existing accounts
+	existingAccounts, err := h.listAccountsFiltered(ctx, "", "", "", "", 0, "", "created_at", "desc")
+	if err != nil {
+		return result, err
+	}
+	credFingerprintSet := make(map[string]struct{}, len(existingAccounts))
+	for i := range existingAccounts {
+		fp := accountCredentialFingerprint(existingAccounts[i].Platform, existingAccounts[i].Type, existingAccounts[i].Credentials)
+		if fp != "" {
+			credFingerprintSet[fp] = struct{}{}
+		}
+	}
+
 	// 收集需要异步设置隐私的 Antigravity OAuth 账号
 	var privacyAccounts []*service.Account
 
@@ -301,6 +340,14 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 
 		enrichCredentialsFromIDToken(&item)
 
+		fp := accountCredentialFingerprint(item.Platform, item.Type, item.Credentials)
+		if fp != "" {
+			if _, exists := credFingerprintSet[fp]; exists {
+				result.AccountSkipped++
+				continue
+			}
+		}
+
 		accountInput := &service.CreateAccountInput{
 			Name:                 item.Name,
 			Notes:                item.Notes,
@@ -327,6 +374,9 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 				Message: err.Error(),
 			})
 			continue
+		}
+		if fp != "" {
+			credFingerprintSet[fp] = struct{}{}
 		}
 		// 收集 Antigravity OAuth 账号，稍后异步设置隐私
 		if created.Platform == service.PlatformAntigravity && created.Type == service.AccountTypeOAuth {
