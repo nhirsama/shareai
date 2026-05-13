@@ -243,6 +243,7 @@ import type { Account, ClaudeModel } from '@/types'
 
 const { t } = useI18n()
 const { copyToClipboard } = useClipboard()
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1'
 
 interface OutputLine {
   text: string
@@ -400,7 +401,7 @@ const startTest = async () => {
 
   try {
     // Create EventSource for SSE
-    const url = `/api/v1/admin/accounts/${props.account.id}/test`
+    const url = `${API_BASE_URL.replace(/\/+$/, '')}/admin/accounts/${props.account.id}/test`
 
     // Use fetch with streaming for SSE since EventSource doesn't support POST
     const response = await fetch(url, {
@@ -410,9 +411,9 @@ const startTest = async () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-              model_id: selectedModelId.value,
-              prompt: supportsImageTest.value ? testPrompt.value.trim() : ''
-            }),
+        model_id: selectedModelId.value,
+        prompt: supportsImageTest.value ? testPrompt.value.trim() : ''
+      }),
       signal: abortController.signal
     })
 
