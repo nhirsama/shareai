@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Access Restricted</title>
+  <link rel="icon" href="data:,">
+  <style>
+    html,
+    body {
+      margin: 0;
+      min-height: 100%;
+      background: #f9fafb;
+      color: #4b5563;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    body {
+      box-sizing: border-box;
+      display: flex;
+      min-height: 100vh;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 24px;
+    }
+
+    main {
+      width: 100%;
+      max-width: 960px;
+      text-align: center;
+    }
+
+    svg {
+      width: 56px;
+      height: 56px;
+      color: currentColor;
+    }
+
+    p {
+      margin: 0;
+      font-size: 16px;
+      line-height: 1.8;
+    }
+
+    p:first-of-type {
+      margin-top: 24px;
+    }
+
+    @media (min-width: 640px) {
+      p {
+        white-space: nowrap;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 0 0 5.636 5.636m12.728 12.728A9 9 0 0 1 5.636 5.636m12.728 12.728L5.636 5.636"/>
+    </svg>
+    <p>基于适用法律法规及合规要求，本服务暂不向您当前所在地区提供访问。</p>
+    <p>Access to this service is currently unavailable in your region due to applicable legal and compliance requirements.</p>
+  </main>
+</body>
+</html>
