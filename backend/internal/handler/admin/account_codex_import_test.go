@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
 func TestParseCodexSessionImportEntriesSupportsRawTokenJSONAndArray(t *testing.T) {
@@ -298,23 +300,115 @@ func TestResolveCodexImportExpiryForNoRefreshTokenUsesEarlierRequestExpiry(t *te
 	}
 }
 
-func TestCodexIdentityKeysPreferStrongIdentifiers(t *testing.T) {
-	keys := buildCodexIdentityKeys("acct-1", "user-1", "same@example.com", "token")
+func TestCodexIdentityKeysUseAccessTokenOnly(t *testing.T) {
+	keys := buildCodexIdentityKeys("token")
+	if len(keys) != 1 {
+		t.Fatalf("len(keys) = %d, want 1: %v", len(keys), keys)
+	}
+	if want := "access:" + codexTokenFingerprint("token"); keys[0] != want {
+		t.Fatalf("key = %q, want %q", keys[0], want)
+	}
 	for _, key := range keys {
 		if strings.HasPrefix(key, "email:") {
-			t.Fatalf("strong identity should not include email fallback: %v", keys)
+			t.Fatalf("identity should not include email fallback: %v", keys)
+		}
+		if strings.HasPrefix(key, "user:") {
+			t.Fatalf("identity should not include user fallback: %v", keys)
 		}
 	}
 
-	keys = buildCodexIdentityKeys("", "", "same@example.com", "token")
-	hasEmail := false
-	for _, key := range keys {
-		if key == "email:same@example.com" {
-			hasEmail = true
-		}
+	keys = buildCodexIdentityKeys("")
+	if len(keys) != 0 {
+		t.Fatalf("identity without access token should not produce keys: %v", keys)
 	}
-	if !hasEmail {
-		t.Fatalf("weak identity should include email fallback: %v", keys)
+}
+
+func TestCodexAccountIndexMatchesByAccessTokenOnly(t *testing.T) {
+	index := buildCodexAccountIndex([]service.Account{
+		{
+			ID:       1,
+			Platform: "openai",
+			Type:     "oauth",
+			Credentials: map[string]any{
+				"chatgpt_account_id": "acct-existing",
+				"chatgpt_user_id":    "user-shared",
+				"email":              "same@example.com",
+				"access_token":       "old-token",
+			},
+		},
+	})
+
+	keys := buildCodexIdentityKeys("new-token")
+	if existing := index.Find(keys); existing != nil {
+		t.Fatalf("matched account %d by shared user/email, want no match", existing.ID)
+	}
+
+	keys = buildCodexIdentityKeys("old-token")
+	existing := index.Find(keys)
+	if existing == nil {
+		t.Fatalf("same access token should match existing account")
+	}
+	if existing.ID != 1 {
+		t.Fatalf("matched account %d, want 1", existing.ID)
+	}
+}
+
+func TestImportCodexSessionsSkipsExistingWhenUpdateDisabled(t *testing.T) {
+	accessToken := buildCodexImportTestJWT(t, time.Now().Add(time.Hour), map[string]any{})
+	adminSvc := newStubAdminService()
+	adminSvc.accounts = []service.Account{
+		{
+			ID:       42,
+			Name:     "existing-codex",
+			Platform: service.PlatformOpenAI,
+			Type:     service.AccountTypeOAuth,
+			Credentials: map[string]any{
+				"access_token": accessToken,
+			},
+		},
+	}
+	handler := NewAccountHandler(
+		adminSvc,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+	updateExisting := false
+
+	result, err := handler.importCodexSessions(
+		t.Context(),
+		CodexSessionImportRequest{UpdateExisting: &updateExisting},
+		[]codexImportEntry{{Index: 1, Value: accessToken}},
+	)
+	if err != nil {
+		t.Fatalf("importCodexSessions error = %v", err)
+	}
+	if result.Created != 0 {
+		t.Fatalf("created = %d, want 0", result.Created)
+	}
+	if result.Updated != 0 {
+		t.Fatalf("updated = %d, want 0", result.Updated)
+	}
+	if result.Skipped != 1 {
+		t.Fatalf("skipped = %d, want 1", result.Skipped)
+	}
+	if len(adminSvc.createdAccounts) != 0 {
+		t.Fatalf("createdAccounts len = %d, want 0", len(adminSvc.createdAccounts))
+	}
+	if len(adminSvc.updatedAccounts) != 0 {
+		t.Fatalf("updatedAccounts len = %d, want 0", len(adminSvc.updatedAccounts))
+	}
+	if len(result.Items) != 1 || result.Items[0].Action != "skipped" || result.Items[0].AccountID != 42 {
+		t.Fatalf("items = %+v, want skipped existing account 42", result.Items)
 	}
 }
 

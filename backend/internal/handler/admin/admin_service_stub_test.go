@@ -27,6 +27,8 @@ type stubAdminService struct {
 	createAccountErr     error
 	createAccountErrOnce bool
 	updateAccountErr     error
+	updatedAccountIDs    []int64
+	updatedAccounts      []*service.UpdateAccountInput
 	bulkUpdateAccountErr error
 	checkMixedErr        error
 	lastMixedCheck       struct {
@@ -343,6 +345,8 @@ func (s *stubAdminService) CreateAccount(ctx context.Context, input *service.Cre
 }
 
 func (s *stubAdminService) UpdateAccount(ctx context.Context, id int64, input *service.UpdateAccountInput) (*service.Account, error) {
+	s.updatedAccountIDs = append(s.updatedAccountIDs, id)
+	s.updatedAccounts = append(s.updatedAccounts, input)
 	if s.updateAccountErr != nil {
 		return nil, s.updateAccountErr
 	}

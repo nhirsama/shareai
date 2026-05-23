@@ -97,9 +97,7 @@ func accountCredentialFingerprint(platform, accountType string, credentials map[
 	var raw string
 	switch normalizedType {
 	case service.AccountTypeOAuth, service.AccountTypeSetupToken:
-		if rt, ok := credentials["refresh_token"].(string); ok && strings.TrimSpace(rt) != "" {
-			raw = "rt:" + strings.TrimSpace(rt)
-		} else if at, ok := credentials["access_token"].(string); ok && strings.TrimSpace(at) != "" {
+		if at, ok := credentials["access_token"].(string); ok && strings.TrimSpace(at) != "" {
 			raw = "at:" + strings.TrimSpace(at)
 		}
 	case service.AccountTypeAPIKey:
