@@ -1116,6 +1116,7 @@ export interface AdminDataImportResult {
   account_skipped: number
   account_failed: number
   errors?: AdminDataImportError[]
+  warnings?: AdminDataImportError[]
 }
 
 export interface CodexSessionImportRequest {

@@ -330,6 +330,9 @@ func TestImportDataDeduplicatesAgainstExisting(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	require.Equal(t, 1, resp.Data.AccountSkipped)
 	require.Equal(t, 1, resp.Data.AccountCreated)
+	require.Len(t, resp.Data.Warnings, 1)
+	require.Equal(t, "dup", resp.Data.Warnings[0].Name)
+	require.Contains(t, resp.Data.Warnings[0].Message, "credential already exists")
 	require.Len(t, adminSvc.createdAccounts, 1)
 	require.Equal(t, "new-account", adminSvc.createdAccounts[0].Name)
 }

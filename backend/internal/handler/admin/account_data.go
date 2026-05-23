@@ -74,6 +74,7 @@ type DataImportResult struct {
 	AccountSkipped int               `json:"account_skipped"`
 	AccountFailed  int               `json:"account_failed"`
 	Errors         []DataImportError `json:"errors,omitempty"`
+	Warnings       []DataImportError `json:"warnings,omitempty"`
 }
 
 type DataImportError struct {
@@ -347,6 +348,11 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 		if fp != "" {
 			if _, exists := credFingerprintSet[fp]; exists {
 				result.AccountSkipped++
+				result.Warnings = append(result.Warnings, DataImportError{
+					Kind:    "account",
+					Name:    item.Name,
+					Message: "credential already exists, skipped",
+				})
 				continue
 			}
 		}
