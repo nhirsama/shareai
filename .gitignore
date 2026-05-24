@@ -136,3 +136,6 @@ docs/*
 frontend/coverage/
 aicodex
 output/
+
+
+/frontend_docs

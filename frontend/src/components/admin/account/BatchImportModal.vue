@@ -102,6 +102,16 @@
             </div>
           </div>
         </div>
+        <div v-if="result.warnings?.length" class="mt-2">
+          <div class="text-sm font-medium text-amber-600 dark:text-amber-400">
+            {{ t('admin.accounts.batchImportWarnings') }}
+          </div>
+          <div class="mt-2 max-h-48 overflow-auto rounded-lg bg-gray-50 p-3 font-mono text-xs dark:bg-dark-800">
+            <div v-for="(item, idx) in result.warnings" :key="idx" class="whitespace-pre-wrap">
+              {{ item.name || '-' }} — {{ item.message }}
+            </div>
+          </div>
+        </div>
       </div>
     </form>
 
@@ -277,11 +287,16 @@ const handleImport = async () => {
 
     if (res.account_failed > 0) {
       appStore.showError(t('admin.accounts.batchImportCompletedWithErrors', { failed: res.account_failed }))
-    } else if (parseErrors.value.length > 0 || parsed.skipped > 0) {
-      appStore.showSuccess(t('admin.accounts.batchImportSuccess', { created: res.account_created }))
-    } else {
+      if (res.account_created > 0) {
+        emit('imported')
+      }
+    } else if (res.account_created > 0) {
       appStore.showSuccess(t('admin.accounts.batchImportSuccess', { created: res.account_created }))
       emit('imported')
+    } else if (res.account_skipped > 0) {
+      appStore.showInfo(t('admin.accounts.batchImportAllSkipped', { skipped: res.account_skipped }))
+    } else {
+      appStore.showError(t('admin.accounts.batchImportNoAccounts'))
     }
   } catch (error: unknown) {
     appStore.showError(extractApiErrorMessage(error, t('admin.accounts.batchImportFailed')))

@@ -243,7 +243,25 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 		}
 		markCodexIdentitySeen(seenIdentity, item.IdentityKeys, entry.Index)
 
-		if existing := index.Find(item.IdentityKeys); existing != nil && updateExisting {
+		if existing := index.Find(item.IdentityKeys); existing != nil {
+			if !updateExisting {
+				message := fmt.Sprintf("账号凭据已存在（账号 ID %d），已跳过", existing.ID)
+				result.Skipped++
+				result.Items = append(result.Items, CodexSessionImportItem{
+					Index:     entry.Index,
+					Name:      accountName,
+					Action:    "skipped",
+					AccountID: existing.ID,
+					Message:   message,
+				})
+				result.Warnings = append(result.Warnings, CodexSessionImportMessage{
+					Index:   entry.Index,
+					Name:    accountName,
+					Message: message,
+				})
+				continue
+			}
+
 			mergedCredentials := mergeCodexImportCredentials(existing.Credentials, credentials, item)
 			mergedExtra := mergeCodexImportMap(existing.Extra, extra)
 			updateInput := &service.UpdateAccountInput{
@@ -583,7 +601,7 @@ func normalizeCodexImportEntry(entry codexImportEntry) (*codexImportAccount, err
 
 	fingerprint := codexTokenFingerprint(item.AccessToken)
 	item.Extra["access_token_sha256"] = fingerprint
-	item.IdentityKeys = buildCodexIdentityKeys(item.AccountID, item.UserID, item.Email, item.AccessToken)
+	item.IdentityKeys = buildCodexIdentityKeys(item.AccessToken)
 	item.Name = buildCodexImportAccountName(item, entry.Index)
 
 	return item, nil
@@ -802,21 +820,8 @@ func sanitizeCodexImportCredentialExtras(input map[string]any) map[string]any {
 	return out
 }
 
-func buildCodexIdentityKeys(accountID, userID, email, accessToken string) []string {
-	keys := make([]string, 0, 4)
-	accountID = strings.TrimSpace(accountID)
-	userID = strings.TrimSpace(userID)
-	if accountID != "" {
-		keys = append(keys, "account:"+accountID)
-	}
-	if userID != "" {
-		keys = append(keys, "user:"+userID)
-	}
-	if accountID == "" && userID == "" {
-		if email = strings.ToLower(strings.TrimSpace(email)); email != "" {
-			keys = append(keys, "email:"+email)
-		}
-	}
+func buildCodexIdentityKeys(accessToken string) []string {
+	keys := make([]string, 0, 1)
 	if accessToken = strings.TrimSpace(accessToken); accessToken != "" {
 		keys = append(keys, "access:"+codexTokenFingerprint(accessToken))
 	}
@@ -838,12 +843,7 @@ func (i *codexAccountIndex) Add(account service.Account) {
 	if i.accountsByKey == nil {
 		i.accountsByKey = map[string]service.Account{}
 	}
-	keys := buildCodexIdentityKeys(
-		codexCredentialString(account.Credentials, "chatgpt_account_id"),
-		codexCredentialString(account.Credentials, "chatgpt_user_id"),
-		codexCredentialString(account.Credentials, "email"),
-		codexCredentialString(account.Credentials, "access_token"),
-	)
+	keys := buildCodexIdentityKeys(codexCredentialString(account.Credentials, "access_token"))
 	for _, key := range keys {
 		i.accountsByKey[key] = account
 	}

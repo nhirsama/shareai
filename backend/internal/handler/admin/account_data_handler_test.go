@@ -286,7 +286,7 @@ func TestImportDataDeduplicatesAgainstExisting(t *testing.T) {
 			Name:        "existing",
 			Platform:    service.PlatformOpenAI,
 			Type:        service.AccountTypeOAuth,
-			Credentials: map[string]any{"refresh_token": "rt-existing-123", "access_token": "at-old"},
+			Credentials: map[string]any{"refresh_token": "rt-existing-123", "access_token": "at-existing"},
 			Status:      service.StatusActive,
 		},
 	}
@@ -301,7 +301,7 @@ func TestImportDataDeduplicatesAgainstExisting(t *testing.T) {
 					"name":        "dup",
 					"platform":    service.PlatformOpenAI,
 					"type":        service.AccountTypeOAuth,
-					"credentials": map[string]any{"refresh_token": "rt-existing-123", "access_token": "at-new"},
+					"credentials": map[string]any{"refresh_token": "rt-new-value", "access_token": "at-existing"},
 					"concurrency": 3,
 					"priority":    50,
 				},
@@ -330,8 +330,60 @@ func TestImportDataDeduplicatesAgainstExisting(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	require.Equal(t, 1, resp.Data.AccountSkipped)
 	require.Equal(t, 1, resp.Data.AccountCreated)
+	require.Len(t, resp.Data.Warnings, 1)
+	require.Equal(t, "dup", resp.Data.Warnings[0].Name)
+	require.Contains(t, resp.Data.Warnings[0].Message, "credential already exists")
 	require.Len(t, adminSvc.createdAccounts, 1)
 	require.Equal(t, "new-account", adminSvc.createdAccounts[0].Name)
+}
+
+func TestImportDataOAuthSameRefreshDifferentAccessTokenNotSkipped(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+
+	adminSvc.accounts = []service.Account{
+		{
+			ID:          1,
+			Name:        "existing",
+			Platform:    service.PlatformOpenAI,
+			Type:        service.AccountTypeOAuth,
+			Credentials: map[string]any{"refresh_token": "rt-same", "access_token": "at-existing"},
+			Status:      service.StatusActive,
+		},
+	}
+
+	payload := map[string]any{
+		"data": map[string]any{
+			"type":    dataType,
+			"version": dataVersion,
+			"proxies": []map[string]any{},
+			"accounts": []map[string]any{
+				{
+					"name":        "same-rt-new-at",
+					"platform":    service.PlatformOpenAI,
+					"type":        service.AccountTypeOAuth,
+					"credentials": map[string]any{"refresh_token": "rt-same", "access_token": "at-new"},
+					"concurrency": 3,
+					"priority":    50,
+				},
+			},
+		},
+	}
+
+	body, _ := json.Marshal(payload)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp struct {
+		Data DataImportResult `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, 0, resp.Data.AccountSkipped)
+	require.Equal(t, 1, resp.Data.AccountCreated)
+	require.Len(t, adminSvc.createdAccounts, 1)
+	require.Equal(t, "same-rt-new-at", adminSvc.createdAccounts[0].Name)
 }
 
 func TestImportDataDeduplicatesWithinBatch(t *testing.T) {
@@ -519,7 +571,7 @@ func TestImportDataCrossPlatformSameCredentialNotSkipped(t *testing.T) {
 	require.Equal(t, 2, resp.Data.AccountCreated)
 }
 
-func TestImportDataOAuthFallbackToAccessToken(t *testing.T) {
+func TestImportDataOAuthDeduplicatesByAccessToken(t *testing.T) {
 	router, adminSvc := setupAccountDataRouter()
 
 	adminSvc.accounts = []service.Account{
@@ -628,6 +680,20 @@ func TestAccountCredentialFingerprintNormalizesTypeAndTokenWhitespace(t *testing
 	require.Equal(t, expected, actual)
 }
 
+func TestAccountCredentialFingerprintOAuthUsesAccessTokenOnly(t *testing.T) {
+	expected := "openai:oauth:at:at-value"
+	actual := accountCredentialFingerprint(" OpenAI ", " OAUTH ", map[string]any{
+		"access_token":  " at-value ",
+		"refresh_token": " rt-value ",
+	})
+	require.Equal(t, expected, actual)
+
+	actual = accountCredentialFingerprint("openai", service.AccountTypeOAuth, map[string]any{
+		"refresh_token": "rt-value",
+	})
+	require.Empty(t, actual)
+}
+
 func TestImportDataDedupTrimsTokenWhitespace(t *testing.T) {
 	router, adminSvc := setupAccountDataRouter()
 
@@ -637,7 +703,7 @@ func TestImportDataDedupTrimsTokenWhitespace(t *testing.T) {
 			Name:        "existing",
 			Platform:    service.PlatformOpenAI,
 			Type:        service.AccountTypeOAuth,
-			Credentials: map[string]any{"refresh_token": "rt-value"},
+			Credentials: map[string]any{"access_token": "at-value"},
 			Status:      service.StatusActive,
 		},
 	}
@@ -652,7 +718,7 @@ func TestImportDataDedupTrimsTokenWhitespace(t *testing.T) {
 					"name":        "whitespace-token",
 					"platform":    service.PlatformOpenAI,
 					"type":        service.AccountTypeOAuth,
-					"credentials": map[string]any{"refresh_token": " rt-value "},
+					"credentials": map[string]any{"access_token": " at-value "},
 					"concurrency": 3,
 					"priority":    50,
 				},

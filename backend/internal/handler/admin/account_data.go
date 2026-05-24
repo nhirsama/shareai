@@ -74,6 +74,7 @@ type DataImportResult struct {
 	AccountSkipped int               `json:"account_skipped"`
 	AccountFailed  int               `json:"account_failed"`
 	Errors         []DataImportError `json:"errors,omitempty"`
+	Warnings       []DataImportError `json:"warnings,omitempty"`
 }
 
 type DataImportError struct {
@@ -96,9 +97,7 @@ func accountCredentialFingerprint(platform, accountType string, credentials map[
 	var raw string
 	switch normalizedType {
 	case service.AccountTypeOAuth, service.AccountTypeSetupToken:
-		if rt, ok := credentials["refresh_token"].(string); ok && strings.TrimSpace(rt) != "" {
-			raw = "rt:" + strings.TrimSpace(rt)
-		} else if at, ok := credentials["access_token"].(string); ok && strings.TrimSpace(at) != "" {
+		if at, ok := credentials["access_token"].(string); ok && strings.TrimSpace(at) != "" {
 			raw = "at:" + strings.TrimSpace(at)
 		}
 	case service.AccountTypeAPIKey:
@@ -347,6 +346,11 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 		if fp != "" {
 			if _, exists := credFingerprintSet[fp]; exists {
 				result.AccountSkipped++
+				result.Warnings = append(result.Warnings, DataImportError{
+					Kind:    "account",
+					Name:    item.Name,
+					Message: "credential already exists, skipped",
+				})
 				continue
 			}
 		}
