@@ -60,17 +60,20 @@ function createStreamResponse(lines: string[]) {
   } as Response
 }
 
-function mountModal(component: Component = AccountTestModal) {
+function mountModal(
+  account: Record<string, unknown> = {
+    id: 42,
+    name: 'Gemini Image Test',
+    platform: 'gemini',
+    type: 'apikey',
+    status: 'active'
+  },
+  component: Component = AccountTestModal
+) {
   return mount(component, {
     props: {
       show: false,
-      account: {
-        id: 42,
-        name: 'Gemini Image Test',
-        platform: 'gemini',
-        type: 'apikey',
-        status: 'active'
-      }
+      account
     } as any,
     global: {
       stubs: {
@@ -153,7 +156,7 @@ describe('AccountTestModal', () => {
     vi.resetModules()
     const { default: SeparatedModeModal } = await import('../AccountTestModal.vue')
 
-    const wrapper = mountModal(SeparatedModeModal)
+    const wrapper = mountModal(undefined, SeparatedModeModal)
     await wrapper.setProps({ show: true })
     await flushPromises()
 
@@ -167,5 +170,43 @@ describe('AccountTestModal', () => {
     expect(global.fetch).toHaveBeenCalledTimes(1)
     const [url] = (global.fetch as any).mock.calls[0]
     expect(url).toBe('https://api.example.com/api/v1/admin/accounts/42/test')
+  })
+
+  it('grok 账号测试默认选择 Grok 模型', async () => {
+    getAvailableModels.mockResolvedValue([
+      { id: 'grok-4.3', display_name: 'Grok 4.3' },
+      { id: 'grok-build-0.1', display_name: 'Grok Build 0.1' }
+    ])
+    global.fetch = vi.fn().mockResolvedValue(
+      createStreamResponse([
+        'data: {"type":"test_start","model":"grok-4.3"}\n',
+        'data: {"type":"content","text":"ok"}\n',
+        'data: {"type":"test_complete","success":true}\n'
+      ])
+    ) as any
+
+    const wrapper = mountModal({
+      id: 13,
+      name: 'Grok Account',
+      platform: 'grok',
+      type: 'oauth',
+      status: 'active'
+    })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    const buttons = wrapper.findAll('button')
+    const startButton = buttons.find((button) => button.text().includes('admin.accounts.startTest'))
+    expect(startButton).toBeTruthy()
+
+    await startButton!.trigger('click')
+    await flushPromises()
+
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+    const [, request] = (global.fetch as any).mock.calls[0]
+    expect(JSON.parse(request.body)).toEqual({
+      model_id: 'grok-4.3',
+      prompt: ''
+    })
   })
 })
