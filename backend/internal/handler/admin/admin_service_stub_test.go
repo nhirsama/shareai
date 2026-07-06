@@ -27,6 +27,7 @@ type stubAdminService struct {
 	getUserErr           error
 	createAccountErr     error
 	createAccountErrOnce bool
+	createSparkShadowErr error
 	updateAccountErr     error
 	updatedAccountIDs    []int64
 	updatedAccounts      []*service.UpdateAccountInput
@@ -643,6 +644,26 @@ func (s *stubAdminService) ReplaceUserGroup(ctx context.Context, userID, oldGrou
 
 func (s *stubAdminService) RevertAccountProxyFallback(ctx context.Context, id int64) error {
 	return nil
+}
+
+func (s *stubAdminService) CreateShadow(ctx context.Context, parentID int64, opts service.ShadowOptions) (*service.Account, error) {
+	if s.createSparkShadowErr != nil {
+		return nil, s.createSparkShadowErr
+	}
+	pid := parentID
+	return &service.Account{
+		ID:              9001,
+		Name:            opts.Name,
+		Platform:        service.PlatformOpenAI,
+		Type:            service.AccountTypeOAuth,
+		Priority:        opts.Priority,
+		Concurrency:     opts.Concurrency,
+		GroupIDs:        opts.GroupIDs,
+		ParentAccountID: &pid,
+		QuotaDimension:  service.QuotaDimensionSpark,
+		Credentials:     map[string]any{},
+		Extra:           map[string]any{},
+	}, nil
 }
 
 // Ensure stub implements interface.
