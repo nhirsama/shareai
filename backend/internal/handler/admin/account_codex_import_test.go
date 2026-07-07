@@ -332,6 +332,65 @@ func TestCodexIdentityKeysPreferStrongIdentifiers(t *testing.T) {
 	}
 }
 
+func TestImportCodexSessionsSkipsExistingWhenUpdateDisabled(t *testing.T) {
+	accessToken := buildCodexImportTestJWT(t, time.Now().Add(time.Hour), map[string]any{})
+	adminSvc := newStubAdminService()
+	adminSvc.accounts = []service.Account{
+		{
+			ID:       42,
+			Name:     "existing-codex",
+			Platform: service.PlatformOpenAI,
+			Type:     service.AccountTypeOAuth,
+			Credentials: map[string]any{
+				"access_token": accessToken,
+			},
+		},
+	}
+	handler := NewAccountHandler(
+		adminSvc,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+	updateExisting := false
+
+	result, err := handler.importCodexSessions(
+		t.Context(),
+		CodexSessionImportRequest{UpdateExisting: &updateExisting},
+		[]codexImportEntry{{Index: 1, Value: accessToken}},
+	)
+	if err != nil {
+		t.Fatalf("importCodexSessions error = %v", err)
+	}
+	if result.Created != 0 {
+		t.Fatalf("created = %d, want 0", result.Created)
+	}
+	if result.Updated != 0 {
+		t.Fatalf("updated = %d, want 0", result.Updated)
+	}
+	if result.Skipped != 1 {
+		t.Fatalf("skipped = %d, want 1", result.Skipped)
+	}
+	if len(adminSvc.createdAccounts) != 0 {
+		t.Fatalf("createdAccounts len = %d, want 0", len(adminSvc.createdAccounts))
+	}
+	if len(adminSvc.updatedAccounts) != 0 {
+		t.Fatalf("updatedAccounts len = %d, want 0", len(adminSvc.updatedAccounts))
+	}
+	if len(result.Items) != 1 || result.Items[0].Action != "skipped" || result.Items[0].AccountID != 42 {
+		t.Fatalf("items = %+v, want skipped existing account 42", result.Items)
+	}
+}
+
 func TestCodexAccountIndexDoesNotMatchDifferentUsersInSameChatGPTAccount(t *testing.T) {
 	existing := service.Account{
 		ID: 10,

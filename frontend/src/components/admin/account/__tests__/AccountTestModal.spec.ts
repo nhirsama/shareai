@@ -1,6 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AccountTestModal from '../AccountTestModal.vue'
+import type { Component } from 'vue'
 
 const { getAvailableModels, copyToClipboard } = vi.hoisted(() => ({
   getAvailableModels: vi.fn(),
@@ -59,14 +60,17 @@ function createStreamResponse(lines: string[]) {
   } as Response
 }
 
-function mountModal(account: Record<string, unknown> = {
-  id: 42,
-  name: 'Gemini Image Test',
-  platform: 'gemini',
-  type: 'apikey',
-  status: 'active'
-}) {
-  return mount(AccountTestModal, {
+function mountModal(
+  account: Record<string, unknown> = {
+    id: 42,
+    name: 'Gemini Image Test',
+    platform: 'gemini',
+    type: 'apikey',
+    status: 'active'
+  },
+  component: Component = AccountTestModal
+) {
+  return mount(component, {
     props: {
       show: false,
       account
@@ -114,6 +118,7 @@ describe('AccountTestModal', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
+    vi.unstubAllEnvs()
   })
 
   it('gemini 图片模型测试会携带提示词并渲染图片预览', async () => {
@@ -134,7 +139,8 @@ describe('AccountTestModal', () => {
     await flushPromises()
 
     expect(global.fetch).toHaveBeenCalledTimes(1)
-    const [, request] = (global.fetch as any).mock.calls[0]
+    const [url, request] = (global.fetch as any).mock.calls[0]
+    expect(url).toBe('/api/v1/admin/accounts/42/test')
     expect(JSON.parse(request.body)).toEqual({
       model_id: 'gemini-3.1-flash-image',
       prompt: 'draw a tiny orange cat astronaut'
@@ -143,6 +149,27 @@ describe('AccountTestModal', () => {
     const preview = wrapper.find('img[alt="test-image-1"]')
     expect(preview.exists()).toBe(true)
     expect(preview.attributes('src')).toBe('data:image/png;base64,QUJD')
+  })
+
+  it('前后端分离部署时使用配置的后端 API 地址', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'https://api.example.com/api/v1/')
+    vi.resetModules()
+    const { default: SeparatedModeModal } = await import('../AccountTestModal.vue')
+
+    const wrapper = mountModal(undefined, SeparatedModeModal)
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    const buttons = wrapper.findAll('button')
+    const startButton = buttons.find((button) => button.text().includes('admin.accounts.startTest'))
+    expect(startButton).toBeTruthy()
+
+    await startButton!.trigger('click')
+    await flushPromises()
+
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+    const [url] = (global.fetch as any).mock.calls[0]
+    expect(url).toBe('https://api.example.com/api/v1/admin/accounts/42/test')
   })
 
   it('grok 账号测试默认选择 Grok 模型', async () => {
