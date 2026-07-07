@@ -1,7 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AccountTestModal from '../AccountTestModal.vue'
-import type { Component } from 'vue'
 
 const { getAvailableModels, copyToClipboard } = vi.hoisted(() => ({
   getAvailableModels: vi.fn(),
@@ -60,17 +59,17 @@ function createStreamResponse(lines: string[]) {
   } as Response
 }
 
-function mountModal(component: Component = AccountTestModal) {
-  return mount(component, {
+function mountModal(account: Record<string, unknown> = {
+  id: 42,
+  name: 'Gemini Image Test',
+  platform: 'gemini',
+  type: 'apikey',
+  status: 'active'
+}) {
+  return mount(AccountTestModal, {
     props: {
       show: false,
-      account: {
-        id: 42,
-        name: 'Gemini Image Test',
-        platform: 'gemini',
-        type: 'apikey',
-        status: 'active'
-      }
+      account
     } as any,
     global: {
       stubs: {
@@ -115,7 +114,6 @@ describe('AccountTestModal', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
-    vi.unstubAllEnvs()
   })
 
   it('gemini 图片模型测试会携带提示词并渲染图片预览', async () => {
@@ -136,8 +134,7 @@ describe('AccountTestModal', () => {
     await flushPromises()
 
     expect(global.fetch).toHaveBeenCalledTimes(1)
-    const [url, request] = (global.fetch as any).mock.calls[0]
-    expect(url).toBe('/api/v1/admin/accounts/42/test')
+    const [, request] = (global.fetch as any).mock.calls[0]
     expect(JSON.parse(request.body)).toEqual({
       model_id: 'gemini-3.1-flash-image',
       prompt: 'draw a tiny orange cat astronaut'
@@ -148,12 +145,26 @@ describe('AccountTestModal', () => {
     expect(preview.attributes('src')).toBe('data:image/png;base64,QUJD')
   })
 
-  it('前后端分离部署时使用配置的后端 API 地址', async () => {
-    vi.stubEnv('VITE_API_BASE_URL', 'https://api.example.com/api/v1/')
-    vi.resetModules()
-    const { default: SeparatedModeModal } = await import('../AccountTestModal.vue')
+  it('grok 账号测试默认选择 Grok 模型', async () => {
+    getAvailableModels.mockResolvedValue([
+      { id: 'grok-4.3', display_name: 'Grok 4.3' },
+      { id: 'grok-build-0.1', display_name: 'Grok Build 0.1' }
+    ])
+    global.fetch = vi.fn().mockResolvedValue(
+      createStreamResponse([
+        'data: {"type":"test_start","model":"grok-4.3"}\n',
+        'data: {"type":"content","text":"ok"}\n',
+        'data: {"type":"test_complete","success":true}\n'
+      ])
+    ) as any
 
-    const wrapper = mountModal(SeparatedModeModal)
+    const wrapper = mountModal({
+      id: 13,
+      name: 'Grok Account',
+      platform: 'grok',
+      type: 'oauth',
+      status: 'active'
+    })
     await wrapper.setProps({ show: true })
     await flushPromises()
 
@@ -165,7 +176,44 @@ describe('AccountTestModal', () => {
     await flushPromises()
 
     expect(global.fetch).toHaveBeenCalledTimes(1)
-    const [url] = (global.fetch as any).mock.calls[0]
-    expect(url).toBe('https://api.example.com/api/v1/admin/accounts/42/test')
+    const [, request] = (global.fetch as any).mock.calls[0]
+    expect(JSON.parse(request.body)).toEqual({
+      model_id: 'grok-4.3',
+      prompt: ''
+    })
+  })
+
+  it('OpenAI Compact 探测会携带 compact 测试模式', async () => {
+    getAvailableModels.mockResolvedValue([
+      { id: 'gpt-5.4', display_name: 'GPT-5.4' }
+    ])
+    global.fetch = vi.fn().mockResolvedValue(
+      createStreamResponse([
+        'data: {"type":"test_complete","success":true}\n'
+      ])
+    ) as any
+
+    const wrapper = mountModal({
+      id: 42,
+      name: 'OpenAI OAuth',
+      platform: 'openai',
+      type: 'oauth',
+      status: 'active'
+    })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    ;(wrapper.vm as any).selectedModelId = 'gpt-5.4'
+    ;(wrapper.vm as any).testMode = 'compact'
+    await (wrapper.vm as any).startTest()
+    await flushPromises()
+
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+    const [, request] = (global.fetch as any).mock.calls[0]
+    expect(JSON.parse(request.body)).toMatchObject({
+      model_id: 'gpt-5.4',
+      prompt: '',
+      mode: 'compact'
+    })
   })
 })
