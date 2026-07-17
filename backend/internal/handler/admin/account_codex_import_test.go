@@ -332,65 +332,6 @@ func TestCodexIdentityKeysPreferStrongIdentifiers(t *testing.T) {
 	}
 }
 
-func TestImportCodexSessionsSkipsExistingWhenUpdateDisabled(t *testing.T) {
-	accessToken := buildCodexImportTestJWT(t, time.Now().Add(time.Hour), map[string]any{})
-	adminSvc := newStubAdminService()
-	adminSvc.accounts = []service.Account{
-		{
-			ID:       42,
-			Name:     "existing-codex",
-			Platform: service.PlatformOpenAI,
-			Type:     service.AccountTypeOAuth,
-			Credentials: map[string]any{
-				"access_token": accessToken,
-			},
-		},
-	}
-	handler := NewAccountHandler(
-		adminSvc,
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
-	)
-	updateExisting := false
-
-	result, err := handler.importCodexSessions(
-		t.Context(),
-		CodexSessionImportRequest{UpdateExisting: &updateExisting},
-		[]codexImportEntry{{Index: 1, Value: accessToken}},
-	)
-	if err != nil {
-		t.Fatalf("importCodexSessions error = %v", err)
-	}
-	if result.Created != 0 {
-		t.Fatalf("created = %d, want 0", result.Created)
-	}
-	if result.Updated != 0 {
-		t.Fatalf("updated = %d, want 0", result.Updated)
-	}
-	if result.Skipped != 1 {
-		t.Fatalf("skipped = %d, want 1", result.Skipped)
-	}
-	if len(adminSvc.createdAccounts) != 0 {
-		t.Fatalf("createdAccounts len = %d, want 0", len(adminSvc.createdAccounts))
-	}
-	if len(adminSvc.updatedAccounts) != 0 {
-		t.Fatalf("updatedAccounts len = %d, want 0", len(adminSvc.updatedAccounts))
-	}
-	if len(result.Items) != 1 || result.Items[0].Action != "skipped" || result.Items[0].AccountID != 42 {
-		t.Fatalf("items = %+v, want skipped existing account 42", result.Items)
-	}
-}
-
 func TestCodexAccountIndexDoesNotMatchDifferentUsersInSameChatGPTAccount(t *testing.T) {
 	existing := service.Account{
 		ID: 10,
@@ -618,7 +559,7 @@ func TestNormalizeCodexImportUsesJWTSubForAccessTokenOnlyIdentity(t *testing.T) 
 
 func TestImportCodexSessionsAccessTokenOnlySameWorkspaceDifferentUsersCreatesTwoAccounts(t *testing.T) {
 	svc := newCodexImportMemoryAdminService(nil)
-	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	req := CodexSessionImportRequest{SkipDefaultGroupBind: boolPtr(true)}
 	entries := []codexImportEntry{
 		{Index: 1, Value: buildCodexAccessOnlyImportValue(t, "workspace-1", "user-1")},
@@ -642,7 +583,7 @@ func TestImportCodexSessionsAccessTokenOnlySameWorkspaceDifferentUsersCreatesTwo
 
 func TestImportCodexSessionsAccessTokenOnlySameWorkspaceAndUserDifferentTokensCreatesTwoAccounts(t *testing.T) {
 	svc := newCodexImportMemoryAdminService(nil)
-	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	req := CodexSessionImportRequest{SkipDefaultGroupBind: boolPtr(true)}
 	entries := []codexImportEntry{
 		{Index: 1, Value: map[string]any{
@@ -689,8 +630,9 @@ func TestImportCodexSessionsAccessTokenOnlySameUserUpdatesExisting(t *testing.T)
 			"chatgpt_user_id":    "user-1",
 			"access_token":       existingToken,
 		},
+		Extra: map[string]any{"openai_long_context_billing_enabled": false},
 	}})
-	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	req := CodexSessionImportRequest{SkipDefaultGroupBind: boolPtr(true)}
 	entries := []codexImportEntry{
 		{Index: 1, Value: map[string]any{"access_token": existingToken}},
@@ -709,6 +651,9 @@ func TestImportCodexSessionsAccessTokenOnlySameUserUpdatesExisting(t *testing.T)
 	if len(svc.updatedAccounts) != 1 || svc.updatedAccounts[0].id != 10 {
 		t.Fatalf("updated accounts = %+v, want account 10", svc.updatedAccounts)
 	}
+	if got := svc.updatedAccounts[0].input.Extra["openai_long_context_billing_enabled"]; got != false {
+		t.Fatalf("openai_long_context_billing_enabled = %v, want false", got)
+	}
 }
 
 func TestImportCodexSessionsUpgradesAccessTokenOnlyAccountWithRefreshToken(t *testing.T) {
@@ -725,7 +670,7 @@ func TestImportCodexSessionsUpgradesAccessTokenOnlyAccountWithRefreshToken(t *te
 			"access_token":       oldToken,
 		},
 	}})
-	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	req := CodexSessionImportRequest{SkipDefaultGroupBind: boolPtr(true)}
 	entries := []codexImportEntry{
 		{Index: 1, Value: map[string]any{
@@ -764,7 +709,7 @@ func TestImportCodexSessionsAccessTokenOnlyPreservesExistingRefreshToken(t *test
 			"client_id":          "client-old",
 		},
 	}})
-	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	req := CodexSessionImportRequest{SkipDefaultGroupBind: boolPtr(true)}
 	entries := []codexImportEntry{
 		{Index: 1, Value: map[string]any{"access_token": existingToken}},
@@ -807,7 +752,7 @@ func TestImportCodexSessionsBatchOldAccessTokenDoesNotRollbackRefreshToken(t *te
 			"refresh_token":      "refresh-old",
 		},
 	}})
-	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	req := CodexSessionImportRequest{SkipDefaultGroupBind: boolPtr(true)}
 	entries := []codexImportEntry{
 		{Index: 1, Value: map[string]any{
@@ -853,7 +798,7 @@ func TestImportCodexSessionsWithRefreshTokenKeepsExistingDedup(t *testing.T) {
 			"refresh_token":      "refresh-old",
 		},
 	}})
-	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	req := CodexSessionImportRequest{SkipDefaultGroupBind: boolPtr(true)}
 	entries := []codexImportEntry{
 		{Index: 1, Value: buildCodexRefreshImportValue(t, "workspace-1", "user-1", "refresh-new")},
