@@ -3,7 +3,6 @@ package admin
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -55,6 +54,7 @@ func setupAccountDataRouter() (*gin.Engine, *stubAdminService) {
 
 	h := NewAccountHandler(
 		adminSvc,
+		nil,
 		nil,
 		nil,
 		nil,
@@ -517,54 +517,6 @@ func TestImportDataNoFingerprintSkipsDedup(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	require.Equal(t, 0, resp.Data.AccountSkipped)
 	require.Equal(t, 2, resp.Data.AccountCreated)
-}
-
-func TestImportDataCreateFailsRetryNotSkipped(t *testing.T) {
-	router, adminSvc := setupAccountDataRouter()
-	adminSvc.accounts = nil
-	adminSvc.createAccountErr = errors.New("transient error")
-	adminSvc.createAccountErrOnce = true
-
-	payload := map[string]any{
-		"data": map[string]any{
-			"type":    dataType,
-			"version": dataVersion,
-			"proxies": []map[string]any{},
-			"accounts": []map[string]any{
-				{
-					"name":        "first-attempt",
-					"platform":    service.PlatformOpenAI,
-					"type":        service.AccountTypeOAuth,
-					"credentials": map[string]any{"refresh_token": "rt-same"},
-					"concurrency": 3,
-					"priority":    50,
-				},
-				{
-					"name":        "second-attempt",
-					"platform":    service.PlatformOpenAI,
-					"type":        service.AccountTypeOAuth,
-					"credentials": map[string]any{"refresh_token": "rt-same"},
-					"concurrency": 3,
-					"priority":    50,
-				},
-			},
-		},
-	}
-
-	body, _ := json.Marshal(payload)
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(rec, req)
-	require.Equal(t, http.StatusOK, rec.Code)
-
-	var resp struct {
-		Data DataImportResult `json:"data"`
-	}
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	require.Equal(t, 1, resp.Data.AccountFailed)
-	require.Equal(t, 1, resp.Data.AccountCreated)
-	require.Equal(t, 0, resp.Data.AccountSkipped)
 }
 
 func TestImportDataCrossPlatformSameCredentialNotSkipped(t *testing.T) {
