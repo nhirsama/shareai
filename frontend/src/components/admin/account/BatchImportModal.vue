@@ -141,7 +141,8 @@ import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
 import { parseImportFiles } from '@/utils/accountImportParser'
 import { extractApiErrorMessage } from '@/utils/apiError'
-import type { AccountPlatform, AccountType, AdminDataImportResult } from '@/types'
+import type { CredentialImportPlatform } from '@/utils/accountImportParser'
+import type { AccountType, AdminDataImportResult } from '@/types'
 
 interface Props {
   show: boolean
@@ -158,7 +159,7 @@ const emit = defineEmits<Emits>()
 const { t } = useI18n()
 const appStore = useAppStore()
 
-const platform = ref<AccountPlatform>('openai')
+const platform = ref<CredentialImportPlatform>('anthropic')
 const accountType = ref<AccountType>('oauth')
 const files = ref<File[]>([])
 const importing = ref(false)
@@ -168,7 +169,6 @@ const parseTotalErrors = ref(0)
 const fileInput = ref<HTMLInputElement | null>(null)
 
 const platforms = [
-  { value: 'openai' as const, label: 'OpenAI', activeClass: 'text-green-600 dark:text-green-400' },
   { value: 'anthropic' as const, label: 'Anthropic', activeClass: 'text-orange-600 dark:text-orange-400' },
   { value: 'gemini' as const, label: 'Gemini', activeClass: 'text-blue-600 dark:text-blue-400' },
   { value: 'antigravity' as const, label: 'Antigravity', activeClass: 'text-purple-600 dark:text-purple-400' }
@@ -181,8 +181,6 @@ const typeOptions = computed(() => {
         { value: 'oauth', label: 'OAuth' },
         { value: 'setup-token', label: 'Setup Token' }
       ]
-    case 'openai':
-      return [{ value: 'oauth', label: 'OAuth' }]
     case 'gemini':
       return [{ value: 'oauth', label: 'OAuth' }]
     case 'antigravity':

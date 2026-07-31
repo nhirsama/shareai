@@ -254,25 +254,7 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 		markCodexIdentitySeen(seenIdentity, item.IdentityKeys, entry.Index, item.UserID)
 
 		existing, matchedKey := index.Find(item.IdentityKeys, item.UserID)
-		if existing != nil {
-			if !updateExisting {
-				message := fmt.Sprintf("账号凭据已存在（账号 ID %d），已跳过", existing.ID)
-				result.Skipped++
-				result.Items = append(result.Items, CodexSessionImportItem{
-					Index:     entry.Index,
-					Name:      accountName,
-					Action:    "skipped",
-					AccountID: existing.ID,
-					Message:   message,
-				})
-				result.Warnings = append(result.Warnings, CodexSessionImportMessage{
-					Index:   entry.Index,
-					Name:    accountName,
-					Message: message,
-				})
-				continue
-			}
-
+		if existing != nil && updateExisting {
 			if strings.HasPrefix(matchedKey, "account:") && item.UserID != "" &&
 				codexCredentialString(existing.Credentials, "chatgpt_user_id") == "" {
 				result.Warnings = append(result.Warnings, CodexSessionImportMessage{

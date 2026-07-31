@@ -6,7 +6,7 @@ describe('parseImportFiles', () => {
     it('parses a single JSON object', () => {
       const result = parseImportFiles(
         [{ filename: 'test.json', content: '{"access_token": "tok_123", "name": "alice"}' }],
-        'openai',
+        'gemini',
         'oauth'
       )
       expect(result.accounts).toHaveLength(1)
@@ -21,7 +21,7 @@ describe('parseImportFiles', () => {
       ])
       const result = parseImportFiles(
         [{ filename: 'batch.json', content }],
-        'openai',
+        'gemini',
         'oauth'
       )
       expect(result.accounts).toHaveLength(2)
@@ -33,7 +33,7 @@ describe('parseImportFiles', () => {
       const content = '{"access_token":"a","name":"u1"}\n{"access_token":"b","name":"u2"}'
       const result = parseImportFiles(
         [{ filename: 'data.jsonl', content }],
-        'openai',
+        'gemini',
         'oauth'
       )
       expect(result.accounts).toHaveLength(2)
@@ -43,7 +43,7 @@ describe('parseImportFiles', () => {
       const content = '{"access_token":"a"}\nnot json\n{"access_token":"b"}'
       const result = parseImportFiles(
         [{ filename: 'mixed.jsonl', content }],
-        'openai',
+        'gemini',
         'oauth'
       )
       expect(result.accounts).toHaveLength(2)
@@ -54,7 +54,7 @@ describe('parseImportFiles', () => {
     it('reports empty file', () => {
       const result = parseImportFiles(
         [{ filename: 'empty.json', content: '  ' }],
-        'openai',
+        'gemini',
         'oauth'
       )
       expect(result.accounts).toHaveLength(0)
@@ -64,7 +64,7 @@ describe('parseImportFiles', () => {
     it('reports invalid JSON', () => {
       const result = parseImportFiles(
         [{ filename: 'bad.json', content: '[{broken' }],
-        'openai',
+        'gemini',
         'oauth'
       )
       expect(result.accounts).toHaveLength(0)
@@ -72,15 +72,34 @@ describe('parseImportFiles', () => {
     })
   })
 
-  describe('data type: sub2api-data', () => {
+  describe('normalized accounts', () => {
     it('uses correct type string for backend', () => {
       const result = parseImportFiles(
         [{ filename: 'test.json', content: '{"access_token":"tok"}' }],
-        'openai',
+        'gemini',
         'oauth'
       )
-      expect(result.accounts[0].platform).toBe('openai')
+      expect(result.accounts[0].platform).toBe('gemini')
       expect(result.accounts[0].type).toBe('oauth')
+    })
+
+    it('leaves Sub2API export bundles to the standard data importer', () => {
+      const payload = {
+        type: 'sub2api-data',
+        version: 1,
+        proxies: [],
+        accounts: [
+          { name: 'account', platform: 'gemini', type: 'oauth', credentials: { access_token: 'tok' } }
+        ]
+      }
+      const result = parseImportFiles(
+        [{ filename: 'export.json', content: JSON.stringify(payload) }],
+        'gemini',
+        'oauth'
+      )
+
+      expect(result.accounts).toHaveLength(0)
+      expect(result.skipped).toBe(1)
     })
   })
 
@@ -88,7 +107,7 @@ describe('parseImportFiles', () => {
     it('prefers name over email', () => {
       const result = parseImportFiles(
         [{ filename: 'f.json', content: '{"access_token":"t","name":"Alice","email":"a@b.com"}' }],
-        'openai',
+        'gemini',
         'oauth'
       )
       expect(result.accounts[0].name).toBe('Alice')
@@ -97,7 +116,7 @@ describe('parseImportFiles', () => {
     it('falls back to email', () => {
       const result = parseImportFiles(
         [{ filename: 'f.json', content: '{"access_token":"t","email":"a@b.com"}' }],
-        'openai',
+        'gemini',
         'oauth'
       )
       expect(result.accounts[0].name).toBe('a@b.com')
@@ -106,7 +125,7 @@ describe('parseImportFiles', () => {
     it('falls back to filename without extension', () => {
       const result = parseImportFiles(
         [{ filename: 'myaccount.json', content: '{"access_token":"t"}' }],
-        'openai',
+        'gemini',
         'oauth'
       )
       expect(result.accounts[0].name).toBe('myaccount')
@@ -116,52 +135,10 @@ describe('parseImportFiles', () => {
       const longName = 'a'.repeat(150)
       const result = parseImportFiles(
         [{ filename: 'f.json', content: JSON.stringify({ access_token: 't', name: longName }) }],
-        'openai',
+        'gemini',
         'oauth'
       )
       expect(result.accounts[0].name).toHaveLength(100)
-    })
-  })
-
-  describe('OpenAI credentials', () => {
-    it('extracts nested tokens format', () => {
-      const content = JSON.stringify({
-        tokens: { access_token: 'at', refresh_token: 'rt', id_token: 'it' },
-        name: 'user'
-      })
-      const result = parseImportFiles(
-        [{ filename: 'f.json', content }],
-        'openai',
-        'oauth'
-      )
-      expect(result.accounts[0].credentials).toEqual({
-        access_token: 'at',
-        refresh_token: 'rt',
-        id_token: 'it'
-      })
-    })
-
-    it('extracts flat format', () => {
-      const content = JSON.stringify({ access_token: 'at', refresh_token: 'rt' })
-      const result = parseImportFiles(
-        [{ filename: 'f.json', content }],
-        'openai',
-        'oauth'
-      )
-      expect(result.accounts[0].credentials).toEqual({
-        access_token: 'at',
-        refresh_token: 'rt'
-      })
-    })
-
-    it('skips entry without access_token', () => {
-      const result = parseImportFiles(
-        [{ filename: 'f.json', content: '{"refresh_token":"rt","name":"x"}' }],
-        'openai',
-        'oauth'
-      )
-      expect(result.accounts).toHaveLength(0)
-      expect(result.skipped).toBe(1)
     })
   })
 
@@ -205,201 +182,11 @@ describe('parseImportFiles', () => {
       })
       const result = parseImportFiles(
         [{ filename: 'f.json', content }],
-        'openai',
+        'gemini',
         'oauth'
       )
       expect(result.accounts[0].credentials.access_token).toBe('at-from-creds')
       expect(result.accounts[0].credentials.refresh_token).toBe('rt-from-creds')
-    })
-  })
-
-  describe('DataAccount passthrough normalization', () => {
-    it('passes through complete AdminDataAccount format with valid values', () => {
-      const account = {
-        name: 'full-account',
-        platform: 'openai',
-        type: 'oauth',
-        credentials: { access_token: 'tok' },
-        concurrency: 5,
-        priority: 80
-      }
-      const result = parseImportFiles(
-        [{ filename: 'f.json', content: JSON.stringify(account) }],
-        'openai',
-        'oauth'
-      )
-      expect(result.accounts[0].name).toBe('full-account')
-      expect(result.accounts[0].concurrency).toBe(5)
-      expect(result.accounts[0].priority).toBe(80)
-    })
-
-    it('clamps concurrency=0 to minimum 1', () => {
-      const account = {
-        name: 'zero-conc',
-        platform: 'openai',
-        type: 'oauth',
-        credentials: { access_token: 'tok' },
-        concurrency: 0,
-        priority: 50
-      }
-      const result = parseImportFiles(
-        [{ filename: 'f.json', content: JSON.stringify(account) }],
-        'openai',
-        'oauth'
-      )
-      expect(result.accounts[0].concurrency).toBe(1)
-    })
-
-    it('clamps negative concurrency to 1', () => {
-      const account = {
-        name: 'neg-conc',
-        platform: 'openai',
-        type: 'oauth',
-        credentials: { access_token: 'tok' },
-        concurrency: -5,
-        priority: 50
-      }
-      const result = parseImportFiles(
-        [{ filename: 'f.json', content: JSON.stringify(account) }],
-        'openai',
-        'oauth'
-      )
-      expect(result.accounts[0].concurrency).toBe(1)
-    })
-
-    it('defaults concurrency when missing', () => {
-      const account = {
-        name: 'no-conc',
-        platform: 'openai',
-        type: 'oauth',
-        credentials: { access_token: 'tok' }
-      }
-      const result = parseImportFiles(
-        [{ filename: 'f.json', content: JSON.stringify(account) }],
-        'openai',
-        'oauth'
-      )
-      expect(result.accounts[0].concurrency).toBe(3)
-    })
-
-    it('rejects invalid platform', () => {
-      const account = {
-        name: 'bad-plat',
-        platform: 'invalid',
-        type: 'oauth',
-        credentials: { access_token: 'tok' }
-      }
-      const result = parseImportFiles(
-        [{ filename: 'f.json', content: JSON.stringify(account) }],
-        'openai',
-        'oauth'
-      )
-      expect(result.accounts).toHaveLength(0)
-      expect(result.skipped).toBe(1)
-    })
-
-    it('rejects invalid type', () => {
-      const account = {
-        name: 'bad-type',
-        platform: 'openai',
-        type: 'invalid',
-        credentials: { access_token: 'tok' }
-      }
-      const result = parseImportFiles(
-        [{ filename: 'f.json', content: JSON.stringify(account) }],
-        'openai',
-        'oauth'
-      )
-      expect(result.accounts).toHaveLength(0)
-      expect(result.skipped).toBe(1)
-    })
-
-    it('truncates long name in passthrough', () => {
-      const account = {
-        name: 'a'.repeat(150),
-        platform: 'openai',
-        type: 'oauth',
-        credentials: { access_token: 'tok' },
-        concurrency: 3,
-        priority: 50
-      }
-      const result = parseImportFiles(
-        [{ filename: 'f.json', content: JSON.stringify(account) }],
-        'openai',
-        'oauth'
-      )
-      expect(result.accounts[0].name).toHaveLength(100)
-    })
-
-    it('does not treat array credentials as DataAccount format', () => {
-      const account = {
-        name: 'arr-creds',
-        platform: 'openai',
-        type: 'oauth',
-        credentials: ['not', 'valid']
-      }
-      const result = parseImportFiles(
-        [{ filename: 'f.json', content: JSON.stringify(account) }],
-        'openai',
-        'oauth'
-      )
-      expect(result.accounts).toHaveLength(0)
-    })
-
-    it('does not treat empty credentials as DataAccount format', () => {
-      const account = {
-        name: 'empty-creds',
-        platform: 'openai',
-        type: 'oauth',
-        credentials: {}
-      }
-      const result = parseImportFiles(
-        [{ filename: 'f.json', content: JSON.stringify(account) }],
-        'openai',
-        'oauth'
-      )
-      expect(result.accounts).toHaveLength(0)
-    })
-
-    it('strips proxy_key from passthrough accounts', () => {
-      const account = {
-        name: 'with-proxy',
-        platform: 'openai',
-        type: 'oauth',
-        credentials: { access_token: 'tok' },
-        concurrency: 3,
-        priority: 50,
-        proxy_key: 'some-proxy'
-      }
-      const result = parseImportFiles(
-        [{ filename: 'f.json', content: JSON.stringify(account) }],
-        'openai',
-        'oauth'
-      )
-      expect(result.accounts[0].proxy_key).toBeUndefined()
-    })
-  })
-
-  describe('AdminDataPayload wrapper', () => {
-    it('expands accounts from payload wrapper', () => {
-      const payload = {
-        type: 'sub2api-data',
-        version: 1,
-        exported_at: '2026-01-01T00:00:00Z',
-        proxies: [],
-        accounts: [
-          { name: 'acc1', platform: 'openai', type: 'oauth', credentials: { access_token: 'a' }, concurrency: 3, priority: 50 },
-          { name: 'acc2', platform: 'openai', type: 'oauth', credentials: { access_token: 'b' }, concurrency: 3, priority: 50 }
-        ]
-      }
-      const result = parseImportFiles(
-        [{ filename: 'export.json', content: JSON.stringify(payload) }],
-        'openai',
-        'oauth'
-      )
-      expect(result.accounts).toHaveLength(2)
-      expect(result.accounts[0].name).toBe('acc1')
-      expect(result.accounts[1].name).toBe('acc2')
     })
   })
 
@@ -409,7 +196,7 @@ describe('parseImportFiles', () => {
       const content = JSON.stringify(entries)
       const result = parseImportFiles(
         [{ filename: 'f.json', content }],
-        'openai',
+        'gemini',
         'oauth'
       )
       expect(result.errors.length).toBeLessThanOrEqual(100)

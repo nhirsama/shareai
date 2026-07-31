@@ -1,4 +1,6 @@
-import type { AccountPlatform, AccountType, AdminDataAccount } from '@/types'
+import type { AccountType, AdminDataAccount } from '@/types'
+
+export type CredentialImportPlatform = 'anthropic' | 'gemini' | 'antigravity'
 
 export interface ImportFileInput {
   filename: string
@@ -12,15 +14,12 @@ export interface ParseResult {
   totalErrors: number
 }
 
-const VALID_PLATFORMS: AccountPlatform[] = ['openai', 'anthropic', 'gemini', 'antigravity']
-const VALID_TYPES: AccountType[] = ['oauth', 'setup-token', 'apikey', 'upstream', 'bedrock', 'service_account']
-
 const MAX_NAME_LENGTH = 100
 const MAX_ERRORS_REPORTED = 100
 
 export function parseImportFiles(
   files: ImportFileInput[],
-  platform: AccountPlatform,
+  platform: CredentialImportPlatform,
   type: AccountType
 ): ParseResult {
   const accounts: AdminDataAccount[] = []
@@ -87,9 +86,6 @@ function parseFileContent(content: string): FileParseResult {
     try {
       const obj = JSON.parse(trimmed)
       if (Array.isArray(obj)) return { entries: obj, skippedLines: 0 }
-      if (isDataPayloadFormat(obj)) {
-        return { entries: obj.accounts, skippedLines: 0 }
-      }
       return { entries: [obj], skippedLines: 0 }
     } catch {
       return parseJsonLines(trimmed)
@@ -114,10 +110,6 @@ function parseJsonLines(content: string): FileParseResult {
   return { entries: results, skippedLines }
 }
 
-function isDataPayloadFormat(obj: Record<string, unknown>): boolean {
-  return Array.isArray(obj.accounts)
-}
-
 interface NormalizeResult {
   account: AdminDataAccount | null
   reason?: string
@@ -125,7 +117,7 @@ interface NormalizeResult {
 
 function normalizeEntry(
   entry: unknown,
-  platform: AccountPlatform,
+  platform: CredentialImportPlatform,
   type: AccountType,
   filename: string
 ): NormalizeResult {
@@ -133,10 +125,6 @@ function normalizeEntry(
     return { account: null, reason: 'Entry is not a JSON object' }
   }
   const obj = entry as Record<string, unknown>
-
-  if (isDataAccountFormat(obj)) {
-    return normalizeDataAccount(obj)
-  }
 
   const credentials = extractCredentials(obj, platform, type)
   if (!credentials) {
@@ -160,61 +148,9 @@ function normalizeEntry(
   }
 }
 
-function isDataAccountFormat(obj: Record<string, unknown>): boolean {
-  return (
-    typeof obj.platform === 'string' &&
-    typeof obj.type === 'string' &&
-    typeof obj.credentials === 'object' &&
-    obj.credentials !== null &&
-    !Array.isArray(obj.credentials) &&
-    Object.keys(obj.credentials as object).length > 0 &&
-    typeof obj.name === 'string'
-  )
-}
-
-function normalizeDataAccount(obj: Record<string, unknown>): NormalizeResult {
-  const platform = obj.platform as string
-  const type = obj.type as string
-
-  if (!VALID_PLATFORMS.includes(platform as AccountPlatform)) {
-    return { account: null, reason: `${obj.name}: invalid platform "${platform}"` }
-  }
-  if (!VALID_TYPES.includes(type as AccountType)) {
-    return { account: null, reason: `${obj.name}: invalid type "${type}"` }
-  }
-
-  const rawName = String(obj.name)
-  const name = rawName.length > MAX_NAME_LENGTH ? rawName.substring(0, MAX_NAME_LENGTH) : rawName
-
-  const concurrency = clampInt(obj.concurrency, 1, 100, 3)
-  const priority = clampInt(obj.priority, 1, 100, 50)
-
-  const account: AdminDataAccount = {
-    name,
-    platform: platform as AccountPlatform,
-    type: type as AccountType,
-    credentials: obj.credentials as Record<string, unknown>,
-    concurrency,
-    priority
-  }
-
-  if (obj.extra && typeof obj.extra === 'object') account.extra = obj.extra as Record<string, unknown>
-  if (typeof obj.notes === 'string') account.notes = obj.notes
-  if (typeof obj.rate_multiplier === 'number') account.rate_multiplier = Math.max(0, obj.rate_multiplier)
-  if (typeof obj.expires_at === 'number') account.expires_at = obj.expires_at
-  if (typeof obj.auto_pause_on_expired === 'boolean') account.auto_pause_on_expired = obj.auto_pause_on_expired
-
-  return { account }
-}
-
-function clampInt(value: unknown, min: number, max: number, fallback: number): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
-  return Math.max(min, Math.min(max, Math.round(value)))
-}
-
 function extractCredentials(
   obj: Record<string, unknown>,
-  platform: AccountPlatform,
+  platform: CredentialImportPlatform,
   type: AccountType
 ): Record<string, unknown> | null {
   // Also try credentials sub-object (from project's own export format)
@@ -227,8 +163,6 @@ function extractCredentials(
   }
 
   switch (platform) {
-    case 'openai':
-      return extractOpenAICredentials(obj, credObj)
     case 'anthropic':
       return extractAnthropicCredentials(obj, credObj, type)
     case 'gemini':
@@ -238,32 +172,6 @@ function extractCredentials(
     default:
       return null
   }
-}
-
-function extractOpenAICredentials(
-  obj: Record<string, unknown>,
-  credObj: Record<string, unknown> | null
-): Record<string, unknown> | null {
-  const accessToken = getNestedString(obj,
-    ['tokens', 'access_token'], ['tokens', 'accessToken'],
-    ['access_token'], ['accessToken'], ['token']
-  ) || (credObj && getNestedString(credObj, ['access_token']))
-  if (!accessToken) return null
-
-  const creds: Record<string, unknown> = { access_token: accessToken }
-  const refreshToken = getNestedString(obj,
-    ['tokens', 'refresh_token'], ['tokens', 'refreshToken'],
-    ['refresh_token'], ['refreshToken']
-  ) || (credObj && getNestedString(credObj, ['refresh_token']))
-  if (refreshToken) creds.refresh_token = refreshToken
-
-  const idToken = getNestedString(obj,
-    ['tokens', 'id_token'], ['tokens', 'idToken'],
-    ['id_token'], ['idToken']
-  ) || (credObj && getNestedString(credObj, ['id_token']))
-  if (idToken) creds.id_token = idToken
-
-  return creds
 }
 
 function extractAnthropicCredentials(

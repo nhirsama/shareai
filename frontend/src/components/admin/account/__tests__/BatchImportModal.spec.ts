@@ -57,6 +57,8 @@ describe('BatchImportModal', () => {
       }
     })
 
+    expect(wrapper.text()).not.toContain('OpenAI')
+
     const input = wrapper.find('input[type="file"]')
     const file = new File(['{"access_token":"tok","name":"existing"}'], 'account.json', {
       type: 'application/json'
@@ -72,6 +74,13 @@ describe('BatchImportModal', () => {
     await wrapper.find('form').trigger('submit')
     await flushPromises()
 
+    expect(adminAPI.accounts.importData).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          accounts: [expect.objectContaining({ platform: 'anthropic', type: 'oauth' })]
+        })
+      })
+    )
     expect(showInfo).toHaveBeenCalledWith('admin.accounts.batchImportAllSkipped:{"skipped":1}')
     expect(showSuccess).not.toHaveBeenCalled()
   })
