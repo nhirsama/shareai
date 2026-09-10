@@ -1609,8 +1609,10 @@ export interface AdminDataImportResult {
   proxy_reused: number
   proxy_failed: number
   account_created: number
+  account_skipped: number
   account_failed: number
   errors?: AdminDataImportError[]
+  warnings?: AdminDataImportError[]
 }
 
 export interface CodexSessionImportRequest {

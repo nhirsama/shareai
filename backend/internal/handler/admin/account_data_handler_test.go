@@ -317,3 +317,419 @@ func TestImportDataReusesProxyAndSkipsDefaultGroup(t *testing.T) {
 	require.Len(t, adminSvc.createdAccounts, 1)
 	require.True(t, adminSvc.createdAccounts[0].SkipDefaultGroupBind)
 }
+
+func TestImportDataDeduplicatesAgainstExisting(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+
+	adminSvc.accounts = []service.Account{
+		{
+			ID:          1,
+			Name:        "existing",
+			Platform:    service.PlatformOpenAI,
+			Type:        service.AccountTypeOAuth,
+			Credentials: map[string]any{"refresh_token": "rt-existing-123", "access_token": "at-existing"},
+			Status:      service.StatusActive,
+		},
+	}
+
+	payload := map[string]any{
+		"data": map[string]any{
+			"type":    dataType,
+			"version": dataVersion,
+			"proxies": []map[string]any{},
+			"accounts": []map[string]any{
+				{
+					"name":        "dup",
+					"platform":    service.PlatformOpenAI,
+					"type":        service.AccountTypeOAuth,
+					"credentials": map[string]any{"refresh_token": "rt-new-value", "access_token": "at-existing"},
+					"concurrency": 3,
+					"priority":    50,
+				},
+				{
+					"name":        "new-account",
+					"platform":    service.PlatformOpenAI,
+					"type":        service.AccountTypeOAuth,
+					"credentials": map[string]any{"refresh_token": "rt-new-456", "access_token": "at-new2"},
+					"concurrency": 3,
+					"priority":    50,
+				},
+			},
+		},
+	}
+
+	body, _ := json.Marshal(payload)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp struct {
+		Data DataImportResult `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, 1, resp.Data.AccountSkipped)
+	require.Equal(t, 1, resp.Data.AccountCreated)
+	require.Len(t, resp.Data.Warnings, 1)
+	require.Equal(t, "dup", resp.Data.Warnings[0].Name)
+	require.Contains(t, resp.Data.Warnings[0].Message, "credential already exists")
+	require.Len(t, adminSvc.createdAccounts, 1)
+	require.Equal(t, "new-account", adminSvc.createdAccounts[0].Name)
+}
+
+func TestImportDataOAuthSameRefreshDifferentAccessTokenNotSkipped(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+
+	adminSvc.accounts = []service.Account{
+		{
+			ID:          1,
+			Name:        "existing",
+			Platform:    service.PlatformOpenAI,
+			Type:        service.AccountTypeOAuth,
+			Credentials: map[string]any{"refresh_token": "rt-same", "access_token": "at-existing"},
+			Status:      service.StatusActive,
+		},
+	}
+
+	payload := map[string]any{
+		"data": map[string]any{
+			"type":    dataType,
+			"version": dataVersion,
+			"proxies": []map[string]any{},
+			"accounts": []map[string]any{
+				{
+					"name":        "same-rt-new-at",
+					"platform":    service.PlatformOpenAI,
+					"type":        service.AccountTypeOAuth,
+					"credentials": map[string]any{"refresh_token": "rt-same", "access_token": "at-new"},
+					"concurrency": 3,
+					"priority":    50,
+				},
+			},
+		},
+	}
+
+	body, _ := json.Marshal(payload)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp struct {
+		Data DataImportResult `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, 0, resp.Data.AccountSkipped)
+	require.Equal(t, 1, resp.Data.AccountCreated)
+	require.Len(t, adminSvc.createdAccounts, 1)
+	require.Equal(t, "same-rt-new-at", adminSvc.createdAccounts[0].Name)
+}
+
+func TestImportDataDeduplicatesWithinBatch(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	adminSvc.accounts = nil
+
+	payload := map[string]any{
+		"data": map[string]any{
+			"type":    dataType,
+			"version": dataVersion,
+			"proxies": []map[string]any{},
+			"accounts": []map[string]any{
+				{
+					"name":        "first",
+					"platform":    service.PlatformOpenAI,
+					"type":        service.AccountTypeAPIKey,
+					"credentials": map[string]any{"api_key": "sk-same-key"},
+					"concurrency": 3,
+					"priority":    50,
+				},
+				{
+					"name":        "duplicate",
+					"platform":    service.PlatformOpenAI,
+					"type":        service.AccountTypeAPIKey,
+					"credentials": map[string]any{"api_key": "sk-same-key"},
+					"concurrency": 3,
+					"priority":    50,
+				},
+			},
+		},
+	}
+
+	body, _ := json.Marshal(payload)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp struct {
+		Data DataImportResult `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, 1, resp.Data.AccountSkipped)
+	require.Equal(t, 1, resp.Data.AccountCreated)
+	require.Len(t, adminSvc.createdAccounts, 1)
+	require.Equal(t, "first", adminSvc.createdAccounts[0].Name)
+}
+
+func TestImportDataNoFingerprintSkipsDedup(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	adminSvc.accounts = nil
+
+	payload := map[string]any{
+		"data": map[string]any{
+			"type":    dataType,
+			"version": dataVersion,
+			"proxies": []map[string]any{},
+			"accounts": []map[string]any{
+				{
+					"name":        "upstream1",
+					"platform":    service.PlatformOpenAI,
+					"type":        service.AccountTypeUpstream,
+					"credentials": map[string]any{"base_url": "http://example.com"},
+					"concurrency": 3,
+					"priority":    50,
+				},
+				{
+					"name":        "upstream2",
+					"platform":    service.PlatformOpenAI,
+					"type":        service.AccountTypeUpstream,
+					"credentials": map[string]any{"base_url": "http://example.com"},
+					"concurrency": 3,
+					"priority":    50,
+				},
+			},
+		},
+	}
+
+	body, _ := json.Marshal(payload)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp struct {
+		Data DataImportResult `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, 0, resp.Data.AccountSkipped)
+	require.Equal(t, 2, resp.Data.AccountCreated)
+}
+
+func TestImportDataCrossPlatformSameCredentialNotSkipped(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	adminSvc.accounts = nil
+
+	payload := map[string]any{
+		"data": map[string]any{
+			"type":    dataType,
+			"version": dataVersion,
+			"proxies": []map[string]any{},
+			"accounts": []map[string]any{
+				{
+					"name":        "openai-key",
+					"platform":    service.PlatformOpenAI,
+					"type":        service.AccountTypeAPIKey,
+					"credentials": map[string]any{"api_key": "sk-shared-key"},
+					"concurrency": 3,
+					"priority":    50,
+				},
+				{
+					"name":        "anthropic-key",
+					"platform":    service.PlatformAnthropic,
+					"type":        service.AccountTypeAPIKey,
+					"credentials": map[string]any{"api_key": "sk-shared-key"},
+					"concurrency": 3,
+					"priority":    50,
+				},
+			},
+		},
+	}
+
+	body, _ := json.Marshal(payload)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp struct {
+		Data DataImportResult `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, 0, resp.Data.AccountSkipped)
+	require.Equal(t, 2, resp.Data.AccountCreated)
+}
+
+func TestImportDataOAuthDeduplicatesByAccessToken(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+
+	adminSvc.accounts = []service.Account{
+		{
+			ID:          1,
+			Name:        "existing-no-rt",
+			Platform:    service.PlatformOpenAI,
+			Type:        service.AccountTypeOAuth,
+			Credentials: map[string]any{"access_token": "at-existing"},
+			Status:      service.StatusActive,
+		},
+	}
+
+	payload := map[string]any{
+		"data": map[string]any{
+			"type":    dataType,
+			"version": dataVersion,
+			"proxies": []map[string]any{},
+			"accounts": []map[string]any{
+				{
+					"name":        "dup-no-rt",
+					"platform":    service.PlatformOpenAI,
+					"type":        service.AccountTypeOAuth,
+					"credentials": map[string]any{"access_token": "at-existing"},
+					"concurrency": 3,
+					"priority":    50,
+				},
+				{
+					"name":        "different-at",
+					"platform":    service.PlatformOpenAI,
+					"type":        service.AccountTypeOAuth,
+					"credentials": map[string]any{"access_token": "at-different"},
+					"concurrency": 3,
+					"priority":    50,
+				},
+			},
+		},
+	}
+
+	body, _ := json.Marshal(payload)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp struct {
+		Data DataImportResult `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, 1, resp.Data.AccountSkipped)
+	require.Equal(t, 1, resp.Data.AccountCreated)
+	require.Equal(t, "different-at", adminSvc.createdAccounts[0].Name)
+}
+
+func TestImportDataDedupNormalizesPlatformCaseAndWhitespace(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+
+	adminSvc.accounts = []service.Account{
+		{
+			ID:          1,
+			Name:        "existing",
+			Platform:    "openai",
+			Type:        service.AccountTypeAPIKey,
+			Credentials: map[string]any{"api_key": "sk-test"},
+			Status:      service.StatusActive,
+		},
+	}
+
+	payload := map[string]any{
+		"data": map[string]any{
+			"type":    dataType,
+			"version": dataVersion,
+			"proxies": []map[string]any{},
+			"accounts": []map[string]any{
+				{
+					"name":        "same-key-upper-platform",
+					"platform":    "OpenAI",
+					"type":        service.AccountTypeAPIKey,
+					"credentials": map[string]any{"api_key": "sk-test"},
+					"concurrency": 3,
+					"priority":    50,
+				},
+			},
+		},
+	}
+
+	body, _ := json.Marshal(payload)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp struct {
+		Data DataImportResult `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, 1, resp.Data.AccountSkipped)
+	require.Equal(t, 0, resp.Data.AccountCreated)
+}
+
+func TestAccountCredentialFingerprintNormalizesTypeAndTokenWhitespace(t *testing.T) {
+	expected := "openai:apikey:ak:sk-test"
+	actual := accountCredentialFingerprint(" OpenAI ", " APIKEY ", map[string]any{"api_key": " sk-test "})
+	require.Equal(t, expected, actual)
+}
+
+func TestAccountCredentialFingerprintOAuthUsesAccessTokenOnly(t *testing.T) {
+	expected := "openai:oauth:at:at-value"
+	actual := accountCredentialFingerprint(" OpenAI ", " OAUTH ", map[string]any{
+		"access_token":  " at-value ",
+		"refresh_token": " rt-value ",
+	})
+	require.Equal(t, expected, actual)
+
+	actual = accountCredentialFingerprint("openai", service.AccountTypeOAuth, map[string]any{
+		"refresh_token": "rt-value",
+	})
+	require.Empty(t, actual)
+}
+
+func TestImportDataDedupTrimsTokenWhitespace(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+
+	adminSvc.accounts = []service.Account{
+		{
+			ID:          1,
+			Name:        "existing",
+			Platform:    service.PlatformOpenAI,
+			Type:        service.AccountTypeOAuth,
+			Credentials: map[string]any{"access_token": "at-value"},
+			Status:      service.StatusActive,
+		},
+	}
+
+	payload := map[string]any{
+		"data": map[string]any{
+			"type":    dataType,
+			"version": dataVersion,
+			"proxies": []map[string]any{},
+			"accounts": []map[string]any{
+				{
+					"name":        "whitespace-token",
+					"platform":    service.PlatformOpenAI,
+					"type":        service.AccountTypeOAuth,
+					"credentials": map[string]any{"access_token": " at-value "},
+					"concurrency": 3,
+					"priority":    50,
+				},
+			},
+		},
+	}
+
+	body, _ := json.Marshal(payload)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp struct {
+		Data DataImportResult `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, 1, resp.Data.AccountSkipped)
+	require.Equal(t, 0, resp.Data.AccountCreated)
+}
